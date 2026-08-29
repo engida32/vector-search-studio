@@ -4,7 +4,7 @@
 import { embed, cosine } from '../src/lib/embedder.ts';
 import { seedDocuments } from '../src/lib/seed.ts';
 
-const query = process.argv[2] ?? 'how do I log users in without a password';
+const query = process.argv[2] ?? 'log in without a password (magic link)';
 const topK = Number(process.argv[3] ?? 3);
 const qv = embed(query);
 
