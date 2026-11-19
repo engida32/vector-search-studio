@@ -1,5 +1,8 @@
 # Vector Search Studio
 
+[![CI](https://github.com/engida32/vector-search-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/engida32/vector-search-studio/actions/workflows/ci.yml)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue)
+
 A semantic-search reference app: typo-tolerant retrieval over Supabase docs using a **pgvector**-backed PostgreSQL database, an HNSW index, and cosine distance, with a React/TypeScript UI, tests, and CI.
 
 Built by Engida Lishan.
