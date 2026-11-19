@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { embed, type Embedding } from './embedder';
+import { embed } from './embedder';
 import { seedDocuments, type Document } from './seed';
 
 const pool = new Pool({
