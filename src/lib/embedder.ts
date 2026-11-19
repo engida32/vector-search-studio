@@ -1,15 +1,21 @@
 /**
- * Self-contained embedding: hashing-trick bag-of-words with L2-normalization.
+ * Embedding providers behind one interface.
  *
- * No external API keys required, so the demo runs and is testable anywhere.
- * The vector schema is compatible with any real embedding model — swap the
- * tokenizer for e.g. a sentence-transformers or OpenAI embedding and the
- * pgvector column takes it unchanged.
+ * The hashing embedder needs no keys or network, so the demo runs anywhere and
+ * stays testable. The OpenAI provider is the same interface with a real model:
+ * HTTP in, vector out. The pgvector column is sized from the provider, so
+ * switching providers requires a re-seed rather than mixing widths.
  */
 
 export type Embedding = number[];
 
-const DIM = 384;
+export type Embedder = {
+  id: string;
+  dimension: number;
+  embed(text: string): Promise<Embedding>;
+};
+
+const HASH_DIM = 384;
 
 export function tokenize(text: string): string[] {
   return text
@@ -41,9 +47,9 @@ export function embed(text: string): Embedding {
   // Signed random-projection hashing: 2 hashes per token produce a sparse
   // sign-flipped value, giving angular (cosine) similarity between texts that
   // share vocabulary — a lightweight stand-in for dense semantic embeddings.
-  const vec = new Array<number>(DIM).fill(0);
+  const vec = new Array<number>(HASH_DIM).fill(0);
   for (const [token, count] of counts) {
-    const index = fnv1a(token) % DIM;
+    const index = fnv1a(token) % HASH_DIM;
     vec[index] += count * hashSign(1, token);
   }
 
@@ -57,4 +63,52 @@ export function cosine(a: Embedding, b: Embedding): number {
   let dot = 0;
   for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
   return dot;
+}
+
+export const hashEmbedder: Embedder = {
+  id: 'hash-fnv1a-v1',
+  dimension: HASH_DIM,
+  embed: async (text) => embed(text),
+};
+
+export type FetchLike = (
+  input: string,
+  init: { method: string; headers: Record<string, string>; body: string },
+) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
+
+export const OPENAI_MODEL = 'text-embedding-3-small';
+export const OPENAI_DIM = 1536;
+
+export function openaiEmbedder(
+  apiKey: string | undefined,
+  doFetch: FetchLike = fetch as unknown as FetchLike,
+  model: string = OPENAI_MODEL,
+): Embedder {
+  if (!apiKey) throw new Error('EMBEDDER=openai requires OPENAI_API_KEY');
+
+  return {
+    id: `openai-${model}`,
+    dimension: OPENAI_DIM,
+    embed: async (text) => {
+      const response = await doFetch('https://api.openai.com/v1/embeddings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ model, input: text }),
+      });
+      if (!response.ok) {
+        throw new Error(`OpenAI embeddings failed with status ${response.status}`);
+      }
+      const payload = (await response.json()) as { data?: { embedding?: number[] }[] };
+      const vector = payload.data?.[0]?.embedding;
+      if (!vector) throw new Error('OpenAI embeddings returned no vector');
+      return vector;
+    },
+  };
+}
+
+export function getEmbedder(env: Record<string, string | undefined> = process.env): Embedder {
+  const kind = (env.EMBEDDER ?? 'hash').toLowerCase();
+  if (kind === 'hash') return hashEmbedder;
+  if (kind === 'openai') return openaiEmbedder(env.OPENAI_API_KEY);
+  throw new Error(`unknown EMBEDDER: ${kind} (expected hash or openai)`);
 }
