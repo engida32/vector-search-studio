@@ -28,7 +28,7 @@ flowchart LR
   S --> D
 ```
 
-- `src/lib/embedder.ts`: deterministic 384-dimensional hashing embedder, L2-normalized. The tokenizer can be swapped for a real model without changing the schema or queries.
+- `src/lib/embedder.ts`: the `Embedder` interface and its two providers, an offline 384-dimensional hashing embedder and OpenAI `text-embedding-3-small` (1536 dimensions).
 - `src/lib/seed.ts`: loads the sample documents and embeddings.
 - `src/lib/db.ts`: PostgreSQL connection and pgvector setup.
 - `src/app/api/search/route.ts`: query embedding, cosine-distance search, and JSON response.
@@ -40,7 +40,9 @@ The database creates the `documents` table and HNSW index on the first search. S
 
 ## Embeddings
 
-The default embedder is deliberately self-contained: a signed random-projection hashing trick over normalized tokens, so the demo runs anywhere with no API keys. It produces an L2-normalized 384-dimension vector that fits the `vector(384)` column. Swap the tokenizer for any embedding model (OpenAI, sentence-transformers, and others) and the schema and queries stay the same.
+The default embedder is self-contained: a signed random-projection hashing trick over normalized tokens, so the demo runs anywhere with no API keys. It produces an L2-normalized 384-dimension vector.
+
+`EMBEDDER=openai` with `OPENAI_API_KEY` set switches to `text-embedding-3-small` (1536 dimensions) through the same `Embedder` interface. The pgvector column is created at the provider's width, and `embedding_meta` records which provider produced the stored vectors. Pointing a populated database at a different provider fails with an explicit error instead of comparing incomparable vectors; re-seed the `documents` table to switch.
 
 ## Run it
 
@@ -74,11 +76,16 @@ The API creates this schema on first query.
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 
+CREATE TABLE embedding_meta (
+  id        TEXT PRIMARY KEY,
+  dimension INTEGER NOT NULL
+);
+
 CREATE TABLE documents (
   id        SERIAL PRIMARY KEY,
   title     TEXT NOT NULL,
   body      TEXT NOT NULL,
-  embedding vector(384)
+  embedding vector(384)   -- width follows the selected embedder
 );
 
 CREATE INDEX documents_embedding_hnsw
@@ -87,8 +94,8 @@ CREATE INDEX documents_embedding_hnsw
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every push and pull request: `typecheck`, `lint`, `vitest`, then the local search smoke test.
+`.github/workflows/ci.yml` runs on every push and pull request: `typecheck`, `lint`, `vitest`, then the local search smoke test. `src/lib/__tests__/db.integration.test.ts` exercises the real schema, seeding and provider guard when `DATABASE_URL` points at a pgvector database, and skips otherwise.
 
 ---
 
-If you change the embedding dimension, update `DIM` in `src/lib/embedder.ts` and the `vector(384)` column in the schema SQL above.
+To switch providers, set `EMBEDDER`/`OPENAI_API_KEY`, drop the `documents` rows (and the `embedding_meta` row), and let the next search re-create and re-seed them. The dimension is read from the provider, so no source edit is involved.
